@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GlitchTip</title>
+<style>
+  :root { --bg:#f6f5fa; --fg:#1f1d2b; --muted:#6b6880; --card:#fff; --line:#e3e1ec; --accent:#5a3fd0; --bad:#d6336c; --ok:#2f9e44; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+  header { background:#2b2640; color:#fff; padding:10px 20px; display:flex; gap:18px; align-items:center; }
+  header a { color:#cfc9ee; text-decoration:none; }
+  header a.active, header a:hover { color:#fff; }
+  header .brand { font-weight:700; font-size:16px; color:#fff; }
+  header .spacer { flex:1; }
+  main { max-width:1000px; margin:20px auto; padding:0 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:16px; margin-bottom:16px; }
+  h1 { font-size:20px; margin:0 0 14px; } h2 { font-size:16px; margin:0 0 10px; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; font-size:12px; text-transform:uppercase; }
+  input, select, button { font:inherit; padding:7px 10px; border:1px solid var(--line); border-radius:6px; background:#fff; }
+  button { cursor:pointer; background:var(--accent); color:#fff; border-color:var(--accent); }
+  button.secondary { background:#fff; color:var(--fg); border-color:var(--line); }
+  button.danger { background:#fff; color:var(--bad); border-color:var(--bad); }
+  button.on { background:var(--fg); border-color:var(--fg); color:#fff; }
+  form.row, .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+  a { color:var(--accent); cursor:pointer; }
+  code, pre { font:12px/1.5 ui-monospace, Menlo, monospace; background:#f0eef7; border-radius:4px; }
+  code { padding:1px 4px; word-break:break-all; }
+  pre { padding:10px; overflow:auto; }
+  .muted { color:var(--muted); } .err { color:var(--bad); margin:6px 0; }
+  .badge { font-size:11px; padding:2px 7px; border-radius:10px; background:#eee; }
+  .badge.error, .badge.fatal { background:#fde3ec; color:var(--bad); }
+  .badge.warning { background:#fff3d6; color:#9a6700; }
+  .badge.info { background:#dff1ff; color:#0b6bcb; }
+  .frame { padding:4px 8px; border-left:3px solid var(--line); margin:2px 0; }
+  .frame.app { border-color:var(--accent); background:#faf9ff; }
+  .auth { max-width:340px; margin:80px auto; }
+  .spacer { flex:1; }
+  details.frame > summary { cursor:pointer; }
+  pre.source { margin:6px 0; padding:6px 0; }
+  .src { padding:0 10px; white-space:pre; } .src.cur { background:#fff3d6; }
+  .src .ln { display:inline-block; width:44px; color:var(--muted); user-select:none; }
+  table.vars { margin:4px 0 8px; } table.vars td { padding:3px 8px 3px 0; border:0; }
+  code.masked { cursor:pointer; background:#ddd; color:#666; }
+  .bars { display:flex; align-items:flex-end; gap:2px; height:44px; margin:8px 0 12px; }
+  .bar { flex:1; background:var(--accent); opacity:.65; border-radius:2px 2px 0 0; min-width:3px; }
+  .badge a { text-decoration:none; margin-left:2px; }
+  .auth input { width:100%; margin-bottom:10px; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+"use strict";
+// DOM helper: children are always text nodes or elements, never HTML, so
+// event data from untrusted SDKs cannot inject markup.
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (k === "class") el.className = v;
+    else if (v !== false && v != null) el.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid);
+  return el;
+}
+
+async function api(method, path, body) {
+  const res = await fetch("/api/0" + path, {
+    method,
+    headers: { "Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(data.detail || res.statusText), { status: res.status });
+  return data;
+}
+
+const state = { me: null, org: localStorage.getItem("org") };
+const root = document.getElementById("app");
+const ago = s => s ? new Date(s).toLocaleString() : "—";
+const badge = l => h("span", { class: "badge " + l }, l);
+
+function render(...content) { root.replaceChildren(...content); }
+
+// Picks the remembered organization, or the first one the user belongs to.
+function ensureOrg() {
+  const orgs = state.me.organizations;
+  if (!orgs.find(o => o.slug === state.org)) state.org = orgs[0] && orgs[0].slug;
+}
+
+function shell(active, ...content) {
+  const orgs = state.me.organizations;
+  ensureOrg();
+  const sel = h("select", { onchange: e => { state.org = e.target.value; localStorage.setItem("org", state.org); route(); } },
+    orgs.map(o => h("option", { value: o.slug, selected: o.slug === state.org }, o.name)));
+  const link = (href, label) => h("a", { href, class: active === label ? "active" : "" }, label);
+  render(
+    h("header", {}, h("span", { class: "brand" }, "GlitchTip"), sel,
+      link("#/projects", "Projects"), link("#/releases", "Releases"), link("#/settings", "Settings"),
+      h("span", { class: "spacer" }), h("span", {}, state.me.email),
+      h("a", { onclick: async () => { await api("POST", "/auth/logout/"); state.me = null; route(); } }, "Log out")),
+    h("main", {}, ...content));
+}
+
+function errBox() { return h("div", { class: "err" }); }
+function guarded(box, fn) {
+  return async e => { e && e.preventDefault(); box.textContent = ""; try { await fn(e); } catch (x) { box.textContent = x.message; } };
+}
+
+// ---- auth ----
+function authView(mode) {
+  const email = h("input", { type: "email", placeholder: "Email", required: true });
+  const pw = h("input", { type: "password", placeholder: "Password (min 8 chars)", required: true });
+  const box = errBox();
+  const form = h("form", { onsubmit: guarded(box, async () => {
+    state.me = await api("POST", mode === "login" ? "/auth/login/" : "/auth/register/", { email: email.value, password: pw.value });
+    route();
+  }) }, email, pw, h("button", {}, mode === "login" ? "Log in" : "Create account"), box);
+  render(h("div", { class: "card auth" }, h("h1", {}, "GlitchTip"), form,
+    h("p", { class: "muted" }, mode === "login" ? "No account? " : "Have an account? ",
+      h("a", { onclick: () => authView(mode === "login" ? "register" : "login") }, mode === "login" ? "Register" : "Log in"))));
+}
+
+// ---- projects ----
+const base = p => `/projects/${p.organization}/${p.slug}`;
+const isAdmin = org => { const o = state.me.organizations.find(x => x.slug === org); return o && o.role !== "member"; };
+const chips = list => list.map(t => h("span", { class: "badge" }, t));
+
+async function projectsView() {
+  const projects = await api("GET", "/projects/");
+  const mine = projects.filter(p => p.organization === state.org);
+  const name = h("input", { placeholder: "Project name", required: true });
+  const platform = h("input", { placeholder: "Platform (e.g. python)" });
+  const box = errBox();
+  shell("Projects",
+    h("div", { class: "card" }, h("h1", {}, "Projects"),
+      mine.length ? h("table", {}, h("tr", {}, h("th", {}, "Project"), h("th", {}, "Teams"), h("th", {}, "Unresolved"), h("th", {}, "DSN")),
+        mine.map(p => h("tr", {},
+          h("td", {}, h("a", { href: "#/projects/" + p.id }, p.name), h("div", { class: "muted" }, p.platform || "")),
+          h("td", {}, chips(p.teams.map(t => t.name))),
+          h("td", {}, String(p.unresolvedCount)), h("td", {}, h("code", {}, p.dsn || ""))))) : h("p", { class: "muted" }, "No projects yet.")),
+    isAdmin(state.org) ? h("div", { class: "card" }, h("h2", {}, "New project"),
+      h("form", { class: "row", onsubmit: guarded(box, async () => {
+        const p = await api("POST", "/projects/", { name: name.value, platform: platform.value, organization: state.org });
+        location.hash = "#/projects/" + p.id;
+      }) }, name, platform, h("button", {}, "Create")), box) : null);
+}
+
+function statBars(points) {
+  const max = Math.max(1, ...points.map(x => x[1]));
+  return h("div", { class: "bars", title: "events per hour, last 24h" },
+    points.map(([t, n]) => h("div", { class: "bar", title: `${new Date(t * 1000).toLocaleString()}: ${n}`, style: `height:${Math.round(4 + 36 * n / max)}px` })));
+}
+
+async function issuesView(pid, queryText = "is:unresolved") {
+  const projects = await api("GET", "/projects/");
+  const p = projects.find(x => String(x.id) === pid);
+  if (!p) throw new Error("Project not found");
+  const [issues, stats] = await Promise.all([
+    api("GET", `${base(p)}/issues/?limit=100&query=${encodeURIComponent(queryText)}`), api("GET", `${base(p)}/stats/`)]);
+  const search = h("input", { placeholder: "is:unresolved release:1.0 environment:prod browser:chrome text…", value: queryText, style: "flex:1;min-width:260px" });
+  const go = q => issuesView(pid, q).catch(showErr);
+  const withStatus = s => queryText.replace(/!?is:(unresolved|resolved|ignored)\s*/g, "").trim() ? `is:${s} ${queryText.replace(/!?is:(unresolved|resolved|ignored)\s*/g, "").trim()}` : `is:${s}`;
+  const tab = s => h("button", { class: queryText.includes("is:" + s) ? "on" : "secondary", onclick: () => go(withStatus(s)) }, s);
+  const selected = new Set();
+  const box = errBox();
+  const bulk = async body => {
+    if (!selected.size) return;
+    const ids = [...selected].map(i => "id=" + i).join("&");
+    await api("PUT", `${base(p)}/issues/?${ids}`, body);
+    go(queryText);
+  };
+  const act = (label, body, cls = "secondary") => h("button", { class: cls, onclick: guarded(box, () => bulk(body)) }, label);
+  shell("Projects",
+    h("div", { class: "card" },
+      h("div", { class: "row" }, h("h1", { style: "margin:0" }, p.name), h("span", { class: "spacer" }),
+        h("a", { href: `#/projects/${p.id}/settings` }, "Project settings")),
+      h("p", { class: "muted" }, "DSN: ", h("code", {}, p.dsn || ""), " ", chips(p.teams.map(t => t.name))),
+      statBars(stats),
+      h("div", { class: "row" }, tab("unresolved"), tab("resolved"), tab("ignored"),
+        h("form", { class: "row", style: "flex:1;margin:0", onsubmit: e => { e.preventDefault(); go(search.value); } }, search, h("button", { class: "secondary" }, "Search"))),
+      h("div", { class: "row" }, h("span", { class: "muted" }, "Selected:"),
+        act("Resolve", { status: "resolved" }), act("Ignore", { status: "ignored" }), act("Unresolve", { status: "unresolved" }),
+        act("Merge", { merge: true }), box),
+      issues.length ? h("table", {}, h("tr", {}, h("th", {}, ""), h("th", {}, "Issue"), h("th", {}, "Events"), h("th", {}, "Assignee"), h("th", {}, "Last seen")),
+        issues.map(i => h("tr", {},
+          h("td", {}, h("input", { type: "checkbox", onchange: e => e.target.checked ? selected.add(i.id) : selected.delete(i.id) })),
+          h("td", {}, badge(i.level), " ", h("a", { href: "#/issues/" + i.id }, i.title),
+            i.numComments > 0 ? h("span", { class: "muted" }, ` · ${i.numComments} 💬`) : null, h("div", { class: "muted" }, i.culprit || "")),
+          h("td", {}, i.count), h("td", { class: "muted" }, i.assignedTo || "—"), h("td", {}, ago(i.lastSeen))))) : h("p", { class: "muted" }, "No issues.")));
+}
+
+async function projectSettingsView(pid) {
+  const projects = await api("GET", "/projects/");
+  const p = projects.find(x => String(x.id) === pid);
+  if (!p) throw new Error("Project not found");
+  const [keys, teams] = await Promise.all([api("GET", `${base(p)}/keys/`).catch(() => []), api("GET", `/organizations/${p.organization}/teams/`)]);
+  const admin = isAdmin(p.organization);
+  const refresh = () => projectSettingsView(pid).catch(showErr);
+
+  const keep = h("input", { type: "number", min: "1", max: "3650", placeholder: "server default", value: p.retentionDays ?? "", style: "width:130px" });
+  const keepBox = errBox();
+  const label = h("input", { placeholder: "Key label" });
+  const rlCount = h("input", { type: "number", min: "1", placeholder: "events", style: "width:90px" });
+  const rlWindow = h("input", { type: "number", min: "1", max: "86400", placeholder: "per seconds", style: "width:110px" });
+  const origins = h("input", { placeholder: "Allowed origins, comma separated (optional)", style: "flex:1;min-width:240px" });
+  const keyBox = errBox(), teamBox = errBox();
+  const addable = teams.filter(t => !p.teams.some(x => x.slug === t.slug));
+  const pick = h("select", {}, addable.map(t => h("option", { value: t.slug }, t.name)));
+
+  shell("Projects",
+    h("div", { class: "card" }, h("a", { href: "#/projects/" + p.id }, "← Issues"), h("h1", {}, p.name + " settings"),
+      h("form", { class: "row", onsubmit: guarded(keepBox, async () => {
+        await api("PUT", base(p) + "/", { retentionDays: keep.value ? Number(keep.value) : null });
+        keepBox.textContent = "Saved.";
+      }) }, h("span", { class: "muted" }, "Keep events for (days):"), keep, h("button", { class: "secondary" }, "Save"), keepBox)),
+    h("div", { class: "card" }, h("h2", {}, "Client keys (DSN)"),
+      h("table", {}, keys.map(k => h("tr", {},
+        h("td", {}, h("b", {}, k.label), k.isActive ? null : h("span", { class: "badge" }, "disabled"),
+          h("div", {}, h("code", {}, k.dsn.public)),
+          h("div", { class: "muted" }, k.rateLimit ? `Limit: ${k.rateLimit.count} events / ${k.rateLimit.window}s` : "No rate limit",
+            k.allowedOrigins.length ? " · Origins: " + k.allowedOrigins.join(", ") : "")),
+        admin ? h("td", {},
+          h("button", { class: "secondary", onclick: guarded(keyBox, async () => { await api("PUT", `${base(p)}/keys/${k.id}/`, { isActive: !k.isActive }); refresh(); }) }, k.isActive ? "Disable" : "Enable"), " ",
+          h("button", { class: "secondary", onclick: guarded(keyBox, async () => { if (confirm("Rotate this key? The old DSN stops working.")) { await api("POST", `${base(p)}/keys/${k.id}/rotate/`, {}); refresh(); } }) }, "Rotate"), " ",
+          h("button", { class: "danger", onclick: guarded(keyBox, async () => { if (confirm("Delete this key?")) { await api("DELETE", `${base(p)}/keys/${k.id}/`); refresh(); } }) }, "Delete")) : null))),
+      admin ? h("form", { class: "row", onsubmit: guarded(keyBox, async () => {
+        const body = { label: label.value || "New key", allowedOrigins: origins.value.split(",").map(x => x.trim()).filter(Boolean) };
+        if (rlCount.value && rlWindow.value) body.rateLimit = { count: Number(rlCount.value), window: Number(rlWindow.value) };
+        await api("POST", `${base(p)}/keys/`, body); refresh();
+      }) }, label, rlCount, rlWindow, origins, h("button", {}, "Add key")) : null, keyBox),
+    h("div", { class: "card" }, h("h2", {}, "Teams with access"),
+      h("p", { class: "muted" }, "When the organization is not open-membership, only these teams' members (and admins) can see the project."),
+      h("div", { class: "row" }, p.teams.length ? p.teams.map(t => h("span", { class: "badge" }, t.name, " ",
+        admin ? h("a", { onclick: guarded(teamBox, async () => { await api("DELETE", `${base(p)}/teams/${t.slug}/`); refresh(); }) }, "✕") : null)) : h("span", { class: "muted" }, "No teams assigned.")),
+      admin && addable.length ? h("div", { class: "row" }, pick, h("button", { class: "secondary", onclick: guarded(teamBox, async () => { await api("POST", `${base(p)}/teams/${pick.value}/`, {}); refresh(); }) }, "Add team")) : null, teamBox),
+    admin ? h("div", { class: "card" }, h("h2", {}, "Danger zone"),
+      h("button", { class: "danger", onclick: async () => { if (confirm(`Delete ${p.name} and all its events?`)) { await api("DELETE", base(p) + "/"); location.hash = "#/projects"; } } }, "Delete project")) : null);
+}
+
+// ---- issue detail ----
+// Variable names whose values are hidden until clicked (SDKs usually scrub these, but not always).
+const SENSITIVE = /pass(word|wd)?|secret|token|api[_-]?key|auth|credential|private|session|cookie|csrf|bearer|signature/i;
+
+function varValue(name, v) {
+  let text = typeof v === "string" ? v : JSON.stringify(v);
+  if (text === undefined) text = String(v);
+  if (text.length > 500) text = text.slice(0, 500) + "…";
+  if (!SENSITIVE.test(name)) return h("code", {}, text);
+  const el = h("code", { class: "masked", title: "Sensitive-looking name: click to reveal", onclick: () => { el.textContent = text; el.classList.remove("masked"); } }, "••••••••");
+  return el;
+}
+
+function sourceBlock(f) {
+  const pre = f.pre_context || [], post = f.post_context || [];
+  if (!f.context_line && !pre.length && !post.length) return null;
+  const start = (f.lineno || 0) - pre.length;
+  const line = (n, t, cur) => h("div", { class: "src" + (cur ? " cur" : "") }, h("span", { class: "ln" }, n > 0 ? String(n) : ""), t);
+  return h("pre", { class: "source" },
+    pre.map((t, i) => line(start + i, t)),
+    f.context_line != null ? line(f.lineno, f.context_line, true) : null,
+    post.map((t, i) => line((f.lineno || 0) + 1 + i, t)));
+}
+
+function varsTable(vars) {
+  const entries = Object.entries(vars || {});
+  if (!entries.length) return null;
+  return h("table", { class: "vars" }, entries.map(([k, v]) => h("tr", {}, h("td", {}, h("b", {}, k)), h("td", {}, varValue(k, v)))));
+}
+
+function stacktrace(exc) {
+  const frames = ((exc.stacktrace && exc.stacktrace.frames) || []).slice().reverse(); // innermost first
+  return frames.map((f, i) => {
+    const vars = varsTable(f.vars), src = sourceBlock(f);
+    const title = h("summary", {}, h("code", {}, `${f.filename || f.module || "?"}:${f.lineno ?? "?"}`), " in ", h("b", {}, f.function || "?"),
+      vars ? h("span", { class: "muted" }, ` · ${Object.keys(f.vars).length} vars`) : null);
+    return h("details", { class: "frame" + (f.in_app ? " app" : ""), open: i === 0 && (vars || src) ? "" : false }, title,
+      src, vars ? h("div", { class: "muted", style: "margin-top:6px" }, "Variables") : null, vars);
+  });
+}
+
+async function issueView(id) {
+  const [issue, events, comments, tags, projects] = await Promise.all([api("GET", `/issues/${id}/`), api("GET", `/issues/${id}/events/`),
+    api("GET", `/issues/${id}/comments/`), api("GET", `/issues/${id}/tags/`), api("GET", "/projects/")]);
+  const p = projects.find(x => x.id === issue.projectId);
+  const members = p ? await api("GET", `/organizations/${p.organization}/members/`) : [];
+  const latest = events[0] && events[0].data;
+  const refresh = () => issueView(id).catch(showErr);
+  const set = s => async () => { await api("PUT", `/issues/${id}/`, { status: s }); refresh(); };
+  const assignee = h("select", { onchange: async e => { await api("PUT", `/issues/${id}/`, { assignedTo: e.target.value || null }); refresh(); } },
+    h("option", { value: "" }, "Unassigned"),
+    members.map(m => h("option", { value: m.email, selected: m.email === issue.assignedTo }, m.email)));
+  const text = h("textarea", { rows: "3", placeholder: "Add a comment", style: "width:100%;padding:8px;border:1px solid var(--line);border-radius:6px;font:inherit", maxlength: "10000" });
+  const cbox = errBox();
+  let excs = [];
+  if (latest && latest.exception) excs = Array.isArray(latest.exception) ? latest.exception : (latest.exception.values || []);
+  shell("Projects",
+    h("div", { class: "card" },
+      h("a", { href: "#/projects/" + issue.projectId }, "← Issues"),
+      h("h1", {}, badge(issue.level), " ", issue.title),
+      h("p", { class: "muted" }, `${issue.culprit || ""} · ${issue.count} events · first ${ago(issue.firstSeen)} · last ${ago(issue.lastSeen)}`),
+      h("div", { class: "row" }, h("span", {}, "Status: ", h("b", {}, issue.status)),
+        ["unresolved", "resolved", "ignored"].filter(s => s !== issue.status).map(s => h("button", { class: "secondary", onclick: set(s) }, "Mark " + s)),
+        h("span", { class: "spacer" }), h("span", { class: "muted" }, "Assignee:"), assignee)),
+    latest ? h("div", { class: "card" }, h("h2", {}, "Latest event"),
+      h("p", { class: "muted" }, ago(events[0].dateReceived), " · ", h("code", {}, events[0].eventID),
+        events[0].release ? " · release " + events[0].release : "", events[0].environment ? " · " + events[0].environment : ""),
+      excs.map(e => h("div", {}, h("h2", {}, `${e.type || "Error"}: ${e.value || ""}`), stacktrace(e))),
+      h("details", {}, h("summary", {}, "Raw event"), h("pre", {}, JSON.stringify(latest, null, 2)))) : null,
+    tags.length ? h("div", { class: "card" }, h("h2", {}, "Tags"),
+      h("table", {}, tags.map(t => h("tr", {}, h("td", {}, h("b", {}, t.key)),
+        h("td", {}, t.topValues.map(v => h("span", { class: "badge" }, `${v.value} (${v.count})`), " ")))))) : null,
+    h("div", { class: "card" }, h("h2", {}, `Comments (${comments.length})`),
+      comments.map(c => h("div", { class: "frame" }, h("div", { class: "muted" }, `${c.user ? c.user.email : "deleted user"} · ${ago(c.dateCreated)} `,
+        c.user && c.user.id === state.me.id ? h("a", { onclick: async () => { await api("DELETE", `/issues/${id}/comments/${c.id}/`); refresh(); } }, "delete") : null),
+        h("div", { style: "white-space:pre-wrap" }, c.text))),
+      h("form", { onsubmit: guarded(cbox, async () => { await api("POST", `/issues/${id}/comments/`, { text: text.value }); refresh(); }) }, text, h("div", { class: "row" }, h("button", {}, "Comment"), cbox))),
+    h("div", { class: "card" }, h("h2", {}, "Events"),
+      h("table", {}, events.map(e => h("tr", {}, h("td", {}, h("code", {}, e.eventID)), h("td", {}, e.environment || ""), h("td", {}, e.release || ""), h("td", {}, ago(e.dateReceived)))))));
+}
+
+// ---- releases ----
+async function releasesView() {
+  const releases = state.org ? await api("GET", `/organizations/${state.org}/releases/?limit=100`) : [];
+  shell("Releases",
+    h("div", { class: "card" }, h("h1", {}, "Releases"),
+      releases.length ? h("table", {}, h("tr", {}, h("th", {}, "Version"), h("th", {}, "Projects"), h("th", {}, "Last deploy"), h("th", {}, "Created")),
+        releases.map(r => h("tr", {}, h("td", {}, h("code", {}, r.version)), h("td", {}, chips(r.projects.map(x => x.name))),
+          h("td", {}, r.lastDeploy ? `${r.lastDeploy.environment} · ${ago(r.lastDeploy.dateFinished)}` : "—"), h("td", {}, ago(r.dateCreated))))) : h("p", { class: "muted" }, "No releases yet. They appear when events carry a release, or via the releases API.")));
+}
+
+// ---- settings ----
+async function settingsView() {
+  const tokens = await api("GET", "/api-tokens/");
+  const org = state.org;
+  const [members, teams, orgInfo] = org ? await Promise.all([api("GET", `/organizations/${org}/members/`),
+    api("GET", `/organizations/${org}/teams/`), api("GET", `/organizations/${org}/`)]) : [[], [], null];
+  const admin = org && isAdmin(org);
+  const label = h("input", { placeholder: "Token label", required: true });
+  const orgName = h("input", { placeholder: "New organization name", required: true });
+  const email = h("input", { type: "email", placeholder: "User email", required: true });
+  const role = h("select", {}, ["member", "admin", "owner"].map(r => h("option", {}, r)));
+  const teamName = h("input", { placeholder: "New team name", required: true });
+  const box = errBox(), box2 = errBox(), box3 = errBox(), box4 = errBox(), pwBox = errBox();
+  const pwCur = h("input", { type: "password", placeholder: "Current password", required: true, autocomplete: "current-password" });
+  const pwNew = h("input", { type: "password", placeholder: "New password (min 8 chars)", required: true, autocomplete: "new-password", minlength: "8" });
+  const fresh = h("div");
+  const refresh = () => settingsView().catch(showErr);
+  shell("Settings",
+    h("div", { class: "card" }, h("h1", {}, "Organization members"),
+      h("table", {}, members.map(m => h("tr", {}, h("td", {}, m.email), h("td", {}, m.role)))),
+      admin ? h("form", { class: "row", onsubmit: guarded(box2, async () => {
+        await api("POST", `/organizations/${org}/members/`, { email: email.value, role: role.value }); refresh();
+      }) }, email, role, h("button", {}, "Add / update member")) : null, box2,
+      orgInfo && admin ? h("label", { class: "row" }, h("input", { type: "checkbox", checked: orgInfo.openMembership,
+        onchange: async e => { await api("PUT", `/organizations/${org}/`, { openMembership: e.target.checked }); refresh(); } }),
+        " Open membership: every member sees every project (otherwise only team members do)") : null,
+      h("form", { class: "row", onsubmit: guarded(box3, async () => {
+        const o = await api("POST", "/organizations/", { name: orgName.value });
+        state.me = await api("GET", "/auth/me/"); state.org = o.slug; localStorage.setItem("org", o.slug); route();
+      }) }, orgName, h("button", { class: "secondary" }, "Create organization")), box3),
+    org ? h("div", { class: "card" }, h("h1", {}, "Teams"),
+      teams.length ? h("table", {}, h("tr", {}, h("th", {}, "Team"), h("th", {}, "Members"), h("th", {}, "Projects"), h("th", {}, "")),
+        teams.map(t => h("tr", {}, h("td", {}, t.name), h("td", {}, String(t.memberCount)), h("td", {}, chips(t.projects)),
+          h("td", {},
+            h("button", { class: "secondary", onclick: guarded(box4, async () => {
+              await api(t.isMember ? "DELETE" : "POST", `/organizations/${org}/members/${state.me.id}/teams/${t.slug}/`, t.isMember ? undefined : {}); refresh();
+            }) }, t.isMember ? "Leave" : "Join"), " ",
+            admin ? h("button", { class: "danger", onclick: guarded(box4, async () => { if (confirm(`Delete team ${t.name}?`)) { await api("DELETE", `/teams/${org}/${t.slug}/`); refresh(); } }) }, "Delete") : null)))) : h("p", { class: "muted" }, "No teams yet."),
+      admin ? h("form", { class: "row", onsubmit: guarded(box4, async () => { await api("POST", `/organizations/${org}/teams/`, { name: teamName.value }); refresh(); }) },
+        teamName, h("button", {}, "Create team")) : null, box4) : null,
+    h("div", { class: "card" }, h("h1", {}, "Change password"),
+      h("form", { class: "row", onsubmit: guarded(pwBox, async () => {
+        await api("POST", "/auth/password/", { currentPassword: pwCur.value, newPassword: pwNew.value });
+        pwCur.value = ""; pwNew.value = ""; pwBox.textContent = "Password changed. Other sessions were signed out.";
+      }) }, pwCur, pwNew, h("button", {}, "Change")), pwBox),
+    h("div", { class: "card" }, h("h1", {}, "API tokens"),
+      tokens.length ? h("table", {}, tokens.map(t => h("tr", {}, h("td", {}, t.label), h("td", { class: "muted" }, "last used " + ago(t.lastUsed)),
+        h("td", {}, h("button", { class: "danger", onclick: async () => { await api("DELETE", "/api-tokens/" + t.id + "/"); refresh(); } }, "Revoke"))))) : h("p", { class: "muted" }, "No tokens."),
+      fresh,
+      h("form", { class: "row", onsubmit: guarded(box, async () => {
+        const t = await api("POST", "/api-tokens/", { label: label.value });
+        fresh.replaceChildren(h("p", {}, "Copy now, it will not be shown again: ", h("code", {}, t.token)));
+        label.value = "";
+      }) }, label, h("button", {}, "Create token")), box));
+}
+
+// ---- routing ----
+function showErr(e) {
+  if (e.status === 401) { state.me = null; return route(); }
+  shell("", h("div", { class: "card" }, h("div", { class: "err" }, e.message)));
+}
+
+async function route() {
+  if (!state.me) {
+    try { state.me = await api("GET", "/auth/me/"); } catch (e) { return authView("login"); }
+  }
+  ensureOrg();
+  const [, a, b, c] = location.hash.split("/");
+  try {
+    if (a === "issues" && b) await issueView(b);
+    else if (a === "projects" && b && c === "settings") await projectSettingsView(b);
+    else if (a === "projects" && b) await issuesView(b);
+    else if (a === "releases") await releasesView();
+    else if (a === "settings") await settingsView();
+    else await projectsView();
+  } catch (e) { showErr(e); }
+}
+window.addEventListener("hashchange", route);
+route();
+</script>
+</body>
+</html>

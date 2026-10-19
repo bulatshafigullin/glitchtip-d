@@ -1,0 +1,11 @@
+# build output
+/glitchtip-d
+/glitchtip-bench
+/out/
+.dub/
+*.o
+*.a
+dub.userprefs
+# local scratch
+*.log
+.DS_Store

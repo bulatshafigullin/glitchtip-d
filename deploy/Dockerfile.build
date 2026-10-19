@@ -1,0 +1,18 @@
+# Builds the server binary for Debian 13 (x86_64) so it matches the libc/OpenSSL of the host:
+#   docker build -f Dockerfile.build --target out --output type=local,dest=./out .
+FROM debian:trixie-slim AS build
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl xz-utils gcc libc6-dev libssl-dev zlib1g-dev pkg-config git \
+    && rm -rf /var/lib/apt/lists/*
+ARG LDC=1.42.0
+RUN curl -fsSL https://github.com/ldc-developers/ldc/releases/download/v$LDC/ldc2-$LDC-linux-x86_64.tar.xz | tar -xJ -C /opt \
+    && ln -s /opt/ldc2-$LDC-linux-x86_64 /opt/ldc
+ENV PATH=/opt/ldc/bin:$PATH
+WORKDIR /src
+COPY dub.sdl dub.selections.json ./
+COPY source source
+COPY sql sql
+COPY public public
+RUN dub build --compiler=ldc2 -b release
+
+FROM scratch AS out
+COPY --from=build /src/glitchtip-d /glitchtip-d

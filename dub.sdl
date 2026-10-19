@@ -1,0 +1,21 @@
+name "glitchtip-d"
+description "GlitchTip-compatible error tracking server in D (vibe.d + PostgreSQL)"
+license "MIT"
+targetType "executable"
+targetName "glitchtip-d"
+dependency "vibe-d" version="~>0.10.0"
+dependency "postgrex-d" repository="git+https://github.com/bulatshafigullin/postgrex-d.git" version="2de032dc8b1ba683035465ae149efc7b5dca6084"
+stringImportPaths "sql" "public"
+subConfiguration "vibe-stream:tls" "openssl-3.0"
+lflags "-L/opt/homebrew/opt/openssl@3/lib" platform="osx"
+
+configuration "application" {
+    mainSourceFile "source/app.d"
+    excludedSourceFiles "bench/*"
+}
+configuration "bench" {
+    targetName "glitchtip-bench"
+    mainSourceFile "bench/bench.d"
+    sourcePaths "source" "bench"
+    excludedSourceFiles "source/app.d"
+}

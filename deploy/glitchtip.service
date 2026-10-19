@@ -1,0 +1,30 @@
+[Unit]
+Description=GlitchTip (D) error tracking server
+After=network.target postgresql@17-main.service
+Wants=postgresql@17-main.service
+
+[Service]
+User=glitchtip
+Group=glitchtip
+WorkingDirectory=/opt/glitchtip
+EnvironmentFile=/etc/glitchtip/env
+ExecStart=/opt/glitchtip/glitchtip-d
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65536
+MemoryMax=2G
+
+# Hardening: it only needs the network, a private /tmp (the Postgres driver creates short-lived
+# socket files there) and the Postgres unix socket.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

@@ -184,12 +184,13 @@ string issueFilter(ref Q q, string queryText, string userId, bool defaultUnresol
     return sql;
 }
 
-string orderBy(string sort)
+string orderBy(string sort, bool asc = false)
 {
+    immutable d = asc ? " asc" : " desc";
     switch (sort)
     {
-    case "new": return "i.first_seen desc";
-    case "freq": return "i.count desc, i.last_seen desc";
-    default: return "i.last_seen desc";
+    case "new": return "i.first_seen" ~ d ~ ", i.id" ~ d;
+    case "freq": return "i.count" ~ d ~ ", i.last_seen" ~ d ~ ", i.id" ~ d;
+    default: return "i.last_seen" ~ d ~ ", i.id" ~ d;
     }
 }

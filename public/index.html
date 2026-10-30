@@ -158,14 +158,16 @@ function statBars(points) {
     points.map(([t, n]) => h("div", { class: "bar", title: `${new Date(t * 1000).toLocaleString()}: ${n}`, style: `height:${Math.round(4 + 36 * n / max)}px` })));
 }
 
-async function issuesView(pid, queryText = "is:unresolved") {
+async function issuesView(pid, queryText = "is:unresolved", sort = "date", asc = false) {
   const projects = await api("GET", "/projects/");
   const p = projects.find(x => String(x.id) === pid);
   if (!p) throw new Error("Project not found");
   const [issues, stats] = await Promise.all([
-    api("GET", `${base(p)}/issues/?limit=100&query=${encodeURIComponent(queryText)}`), api("GET", `${base(p)}/stats/`)]);
+    api("GET", `${base(p)}/issues/?limit=100&sort=${sort}&order=${asc ? "asc" : "desc"}&query=${encodeURIComponent(queryText)}`), api("GET", `${base(p)}/stats/`)]);
   const search = h("input", { placeholder: "is:unresolved release:1.0 environment:prod browser:chrome text…", value: queryText, style: "flex:1;min-width:260px" });
-  const go = q => issuesView(pid, q).catch(showErr);
+  const go = (q, s = sort, a = asc) => issuesView(pid, q, s, a).catch(showErr);
+  const sortTh = (label, key, width) => h("th", { style: `width:${width}px;cursor:pointer;user-select:none`, onclick: () => go(queryText, key, sort === key ? !asc : false) },
+    label + (sort === key ? (asc ? " ▲" : " ▼") : ""));
   const withStatus = s => queryText.replace(/!?is:(unresolved|resolved|ignored)\s*/g, "").trim() ? `is:${s} ${queryText.replace(/!?is:(unresolved|resolved|ignored)\s*/g, "").trim()}` : `is:${s}`;
   const tab = s => h("button", { class: queryText.includes("is:" + s) ? "on" : "secondary", onclick: () => go(withStatus(s)) }, s);
   const selected = new Set();
@@ -188,7 +190,7 @@ async function issuesView(pid, queryText = "is:unresolved") {
       h("div", { class: "row" }, h("span", { class: "muted" }, "Selected:"),
         act("Resolve", { status: "resolved" }), act("Ignore", { status: "ignored" }), act("Unresolve", { status: "unresolved" }),
         act("Merge", { merge: true }), box),
-      issues.length ? h("table", { class: "issues" }, h("tr", {}, h("th", { style: "width:30px" }, ""), h("th", {}, "Issue"), h("th", { style: "width:70px" }, "Events"), h("th", { style: "width:150px" }, "Assignee"), h("th", { style: "width:110px" }, "Last seen")),
+      issues.length ? h("table", { class: "issues" }, h("tr", {}, h("th", { style: "width:30px" }, ""), h("th", {}, "Issue"), sortTh("Events", "freq", 80), h("th", { style: "width:150px" }, "Assignee"), sortTh("Last seen", "date", 120)),
         issues.map(i => h("tr", {},
           h("td", {}, h("input", { type: "checkbox", onchange: e => e.target.checked ? selected.add(i.id) : selected.delete(i.id) })),
           h("td", { class: "issue" }, badge(i.level), " ", h("a", { href: "#/issues/" + i.id }, i.title),

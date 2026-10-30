@@ -216,7 +216,7 @@ private void listIssuesIn(Auth a, string org, string projSlug, HTTPServerRequest
     auto offset = max(toLong(req.query.get("offset", req.query.get("cursor", "0")), 0), 0);
     res.headers["X-Hits"] = query("select count(*)::text" ~ scope_, q.args)[0][0];
     res.sendJson(queryJson(`select coalesce(json_agg(t), '[]')::text from (select ` ~ issueCols ~ scope_
-        ~ ` order by ` ~ orderBy(req.query.get("sort", "date")) ~ ` limit ` ~ limit.to!string ~ ` offset ` ~ offset.to!string ~ `) t`, q.args));
+        ~ ` order by ` ~ orderBy(req.query.get("sort", "date"), req.query.get("order", "") == "asc") ~ ` limit ` ~ limit.to!string ~ ` offset ` ~ offset.to!string ~ `) t`, q.args));
 }
 
 void orgIssues(HTTPServerRequest req, HTTPServerResponse res, Auth a) @trusted

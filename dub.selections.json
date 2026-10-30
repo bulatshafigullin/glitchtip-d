@@ -1,14 +1,10 @@
 {
 	"fileVersion": 1,
 	"versions": {
-		"derelict-pq": "4.0.0",
-		"derelict-util": "3.0.0-beta.2",
 		"diet-ng": "1.8.4",
-		"dpq2": "1.1.7",
 		"during": "0.3.0",
 		"eventcore": "0.9.39",
 		"mir-linux-kernel": "1.2.1",
-		"money": "3.0.2",
 		"openssl": "3.4.0",
 		"openssl-static": "1.0.5+3.0.8",
 		"silly": "1.1.1",

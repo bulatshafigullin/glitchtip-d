@@ -288,9 +288,10 @@ function stacktrace(exc) {
 async function issueView(id) {
   const [issue, events, comments, tags, projects] = await Promise.all([api("GET", `/issues/${id}/`), api("GET", `/issues/${id}/events/`),
     api("GET", `/issues/${id}/comments/`), api("GET", `/issues/${id}/tags/`), api("GET", "/projects/")]);
+  const lastEvent = events.length ? await api("GET", `/issues/${id}/events/latest/`) : null;
   const p = projects.find(x => x.id === issue.projectId);
   const members = p ? await api("GET", `/organizations/${p.organization}/members/`) : [];
-  const latest = events[0] && events[0].data;
+  const latest = lastEvent && lastEvent.data;
   const refresh = () => issueView(id).catch(showErr);
   const set = s => async () => { await api("PUT", `/issues/${id}/`, { status: s }); refresh(); };
   const assignee = h("select", { onchange: async e => { await api("PUT", `/issues/${id}/`, { assignedTo: e.target.value || null }); refresh(); } },

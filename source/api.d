@@ -389,7 +389,7 @@ void listIssueEvents(HTTPServerRequest req, HTTPServerResponse res, Auth a) @tru
     auto id = req.params["id"];
     issueRole(a, id);
     res.sendJson(queryJson(`select coalesce(json_agg(t), '[]')::text from (
-        select event_id as "eventID", received_at as "dateReceived", environment, release, tags, data
+        select event_id as "eventID", received_at as "dateReceived", environment, release, tags
         from events where issue_id = $1::bigint order by received_at desc limit 100) t`, [id]));
 }
 

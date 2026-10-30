@@ -40,6 +40,8 @@ The first account to register becomes superuser; further sign-ups need `ENABLE_R
 
 ## Deployment behind nginx
 
+Build and install steps (Docker and bare metal): see [DEPLOY.md](DEPLOY.md).
+
 See `deploy/nginx.conf`. Run the app with `TRUST_PROXY=true BIND_ADDRESS=127.0.0.1 PUBLIC_URL=https://your.host`.
 nginx must set `X-Real-IP $remote_addr` (overwriting, not appending) and `X-Forwarded-Proto $scheme`, keep
 `client_max_body_size` at the app's 20 MiB limit, and must not add CORS headers (the app answers ingest preflights).

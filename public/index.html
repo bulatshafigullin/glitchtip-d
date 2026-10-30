@@ -18,6 +18,9 @@
   h1 { font-size:20px; margin:0 0 14px; } h2 { font-size:16px; margin:0 0 10px; }
   table { width:100%; border-collapse:collapse; }
   th, td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+  td.issue { word-break:break-word; overflow-wrap:anywhere; min-width:0; }
+  table.issues { table-layout:fixed; }
+  h1 { overflow-wrap:anywhere; }
   th { color:var(--muted); font-weight:600; font-size:12px; text-transform:uppercase; }
   input, select, button { font:inherit; padding:7px 10px; border:1px solid var(--line); border-radius:6px; background:#fff; }
   button { cursor:pointer; background:var(--accent); color:#fff; border-color:var(--accent); }
@@ -185,10 +188,10 @@ async function issuesView(pid, queryText = "is:unresolved") {
       h("div", { class: "row" }, h("span", { class: "muted" }, "Selected:"),
         act("Resolve", { status: "resolved" }), act("Ignore", { status: "ignored" }), act("Unresolve", { status: "unresolved" }),
         act("Merge", { merge: true }), box),
-      issues.length ? h("table", {}, h("tr", {}, h("th", {}, ""), h("th", {}, "Issue"), h("th", {}, "Events"), h("th", {}, "Assignee"), h("th", {}, "Last seen")),
+      issues.length ? h("table", { class: "issues" }, h("tr", {}, h("th", { style: "width:30px" }, ""), h("th", {}, "Issue"), h("th", { style: "width:70px" }, "Events"), h("th", { style: "width:150px" }, "Assignee"), h("th", { style: "width:110px" }, "Last seen")),
         issues.map(i => h("tr", {},
           h("td", {}, h("input", { type: "checkbox", onchange: e => e.target.checked ? selected.add(i.id) : selected.delete(i.id) })),
-          h("td", {}, badge(i.level), " ", h("a", { href: "#/issues/" + i.id }, i.title),
+          h("td", { class: "issue" }, badge(i.level), " ", h("a", { href: "#/issues/" + i.id }, i.title),
             i.numComments > 0 ? h("span", { class: "muted" }, ` · ${i.numComments} 💬`) : null, h("div", { class: "muted" }, i.culprit || "")),
           h("td", {}, i.count), h("td", { class: "muted" }, i.assignedTo || "—"), h("td", {}, ago(i.lastSeen))))) : h("p", { class: "muted" }, "No issues.")));
 }
@@ -304,7 +307,8 @@ async function issueView(id) {
       h("p", { class: "muted" }, `${issue.culprit || ""} · ${issue.count} events · first ${ago(issue.firstSeen)} · last ${ago(issue.lastSeen)}`),
       h("div", { class: "row" }, h("span", {}, "Status: ", h("b", {}, issue.status)),
         ["unresolved", "resolved", "ignored"].filter(s => s !== issue.status).map(s => h("button", { class: "secondary", onclick: set(s) }, "Mark " + s)),
-        h("span", { class: "spacer" }), h("span", { class: "muted" }, "Assignee:"), assignee)),
+        h("span", { class: "spacer" }), h("span", { class: "muted" }, "Assignee:"), assignee,
+        h("button", { class: "danger", onclick: async () => { if (confirm("Delete this issue and all its events?")) { await api("DELETE", `/issues/${id}/`); location.hash = "#/projects/" + issue.projectId; } } }, "Delete"))),
     latest ? h("div", { class: "card" }, h("h2", {}, "Latest event"),
       h("p", { class: "muted" }, ago(events[0].dateReceived), " · ", h("code", {}, events[0].eventID),
         events[0].release ? " · release " + events[0].release : "", events[0].environment ? " · " + events[0].environment : ""),
